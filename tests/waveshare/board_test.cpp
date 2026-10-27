@@ -28,6 +28,16 @@ int main() {
   assert(!waveshare::decodeTouch(outside,1,x,y));
   assert(!waveshare::decodeTouch(nullptr,0,x,y)); // Release packets have no point data.
   assert(!waveshare::decodeTouch(nullptr,6,x,y)); // Corrupt count must never be decoded.
+  uint8_t v2[9]={0,0,0,1,239,63,80,0x10,0x10};
+  assert(waveshare::decodeTouchV2(v2,x,y) && x==239 && y==319);
+  v2[4]=0;v2[5]=0;v2[7]=0;
+  assert(waveshare::decodeTouchV2(v2,x,y) && x==0 && y==0);
+  v2[8]=0;assert(!waveshare::decodeTouchV2(v2,x,y)); // Release record.
+  v2[8]=0x10;v2[3]=0;assert(!waveshare::decodeTouchV2(v2,x,y));
+  v2[3]=6;assert(!waveshare::decodeTouchV2(v2,x,y));
+  v2[3]=5;assert(waveshare::decodeTouchV2(v2,x,y)); // First of five contacts.
+  v2[4]=240;assert(!waveshare::decodeTouchV2(v2,x,y));
+  v2[4]=0;v2[5]=64;v2[7]=0x10;assert(!waveshare::decodeTouchV2(v2,x,y)); // y=320
   assert(waveshare::batteryMillivolts(1320)>=3997 && waveshare::batteryMillivolts(1320)<=4000);
   assert(waveshare::batteryPercent(0)==0 && waveshare::batteryPercent(3300)==0);
   assert(waveshare::batteryPercent(3750)==50);

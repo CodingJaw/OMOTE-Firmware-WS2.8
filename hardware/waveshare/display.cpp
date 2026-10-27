@@ -26,6 +26,8 @@ public:
   }
 } display;
 volatile bool touchPending=true;
+enum class TouchController {None,CST328,CST3530};
+TouchController touchController=TouchController::None;
 bool pressed=false;
 uint16_t lastX=0,lastY=0;
 void IRAM_ATTR touchInterrupt() { touchPending=true; }
@@ -41,6 +43,27 @@ bool touchRead(uint16_t reg,uint8_t *data,size_t n) {
   for(size_t i=0;i<n;++i) data[i]=Wire1.read();
   return true;
 }
+bool touchProbe(uint8_t address) {
+  Wire1.beginTransmission(address);
+  return Wire1.endTransmission()==0;
+}
+bool touchV2Command(uint32_t reg,bool stop=true) {
+  Wire1.beginTransmission(waveshare::touchV2Address);
+  for(int shift=24;shift>=0;shift-=8) Wire1.write(uint8_t(reg>>shift));
+  return Wire1.endTransmission(stop)==0;
+}
+bool touchV2Read(uint8_t *frame) {
+  bool ok=touchV2Command(0xd0070000,false);
+  if(ok) ok=Wire1.requestFrom(waveshare::touchV2Address,size_t(9))==9;
+  if(ok) for(int i=0;i<9;++i) frame[i]=Wire1.read();
+  // Acknowledge the complete record even when we only use the first contact.
+  bool acknowledged=touchV2Command(0xd00002ab);
+  return ok && acknowledged;
+}
+const char *touchName() {
+  return touchController==TouchController::CST328?"CST328 (V1)":touchController==TouchController::CST3530?"CST3530 (V2)":"none";
+}
+
 }
 
 lv_disp_draw_buf_t draw_buf;
@@ -73,12 +96,14 @@ void init_tft() {
   Wire1.begin(waveshare::touchSda,waveshare::touchScl,400000); Wire1.setTimeOut(50);
   pinMode(waveshare::touchInterrupt,INPUT);
   pinMode(waveshare::touchReset,OUTPUT);
-  digitalWrite(waveshare::touchReset,HIGH); delay(50);
-  digitalWrite(waveshare::touchReset,LOW); delay(5);
-  digitalWrite(waveshare::touchReset,HIGH); delay(50);
+  // V2 CST3530 requires 100 ms reset and 500 ms startup. These longer
+  // delays also satisfy the CST328 timing on V1 units.
+  digitalWrite(waveshare::touchReset,LOW); delay(100);
+  digitalWrite(waveshare::touchReset,HIGH); delay(500);
   attachInterrupt(waveshare::touchInterrupt,touchInterrupt,RISING);
   TouchInitSuccessful=touchChipResponds_display_specific();
-  Serial.printf("Waveshare display setup complete; CST328 %s\n",TouchInitSuccessful?"ready":"absent (use BOOT/PWR navigation)");
+  Serial.printf("Waveshare display setup complete; touch=%s\n",touchName());
+  if(!TouchInitSuccessful) Serial.println("Touch not detected at 0x1A/0x58 on SDA1/SCL3; BOOT/PWR navigation remains available");
 }
 void init_lvgl_buffer() {
   constexpr size_t pixels=240*32;
@@ -95,21 +120,47 @@ void my_disp_flush(lv_disp_drv_t *drv,const lv_area_t *area,lv_color_t *pixels) 
   display.endWrite(); lv_disp_flush_ready(drv);
 }
 bool touchChipResponds_display_specific() {
-  uint8_t id[2]={};
-  if(!touchWrite(0xd101)) return false;
-  bool valid=touchRead(0xd1fe,id,2) && id[0]==0xca && id[1]==0xca;
-  return touchWrite(0xd109) && valid;
+  if(touchController!=TouchController::None) return true;
+  if(touchProbe(waveshare::touchAddress)) {
+    uint8_t id[2]={};
+    bool debug=touchWrite(0xd101);
+    bool valid=debug && touchRead(0xd1fe,id,2) && id[0]==0xca && id[1]==0xca;
+    bool normal=touchWrite(0xd109);
+    if(valid && normal) touchController=TouchController::CST328;
+  }
+  if(touchController==TouchController::None && touchProbe(waveshare::touchV2Address)) {
+    // The V2 vendor driver identifies CST3530 by its I2C acknowledgement.
+    touchController=TouchController::CST3530;
+  }
+  if(touchController!=TouchController::None) {
+    touchPending=true;
+    Serial.printf("Waveshare touch: detected %s\n",touchName());
+    return true;
+  }
+  return false;
 }
 bool touchChipResponds() { return touchChipResponds_display_specific(); }
 void my_touchpad_read_display_specific(lv_indev_drv_t*,lv_indev_data_t *data) {
   noInterrupts(); bool pending=touchPending; touchPending=false; interrupts();
-  if(pending) {
+  static uint32_t lastV2Read=0;
+  bool wasPressed=pressed;
+  if(touchController==TouchController::CST3530) {
+    // V2 records are polled as in the manufacturer protocol. Input must not
+    // depend on receiving an IRQ edge before the first LVGL read.
+    if(uint32_t(millis()-lastV2Read)>=20) {
+      lastV2Read=millis();
+      uint8_t frame[9]={};
+      pressed=touchV2Read(frame) && waveshare::decodeTouchV2(frame,lastX,lastY);
+    }
+  } else if(pending && touchController==TouchController::CST328) {
     uint8_t count=0,frame[5]={},clear=0;
     bool ok=touchRead(0xd005,&count,1);
     if(ok && (count&15)) ok=touchRead(0xd000,frame,sizeof(frame));
     bool ack=touchWrite(0xd005,&clear,1);
     pressed=ok && ack && waveshare::decodeTouch(frame,count&15,lastX,lastY);
   }
+  if(pressed && !wasPressed) Serial.printf("Touch down: x=%u y=%u\n",lastX,lastY);
+  if(!pressed && wasPressed) Serial.println("Touch released");
   data->point.x=lastX; data->point.y=lastY;
   data->state=pressed?LV_INDEV_STATE_PR:LV_INDEV_STATE_REL;
 }

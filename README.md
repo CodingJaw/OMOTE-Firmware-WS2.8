@@ -56,7 +56,7 @@ A dedicated Arduino 3 target is available:
 pio run -e waveshare-esp32-s3-lcd-28
 ```
 
-See [Waveshare setup, wiring, controls and hardware checks](docs/WAVESHARE.md). This target uses Waveshare's SPI LCD, CST328 touch and power circuitry. The stock board has no infrared emitter/receiver; BLE and configured MQTT are available. Physical-board validation is still required.
+See [Waveshare setup, wiring, controls and hardware checks](docs/WAVESHARE.md). This target uses Waveshare's SPI LCD, automatically detected CST328/CST3530 touch and power circuitry. The stock board has no infrared emitter/receiver; BLE and configured MQTT are available. Physical-board validation is still required.
 
 ## Contributing
 

@@ -76,3 +76,10 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -I . tests/waveshare/board_test.cpp -o /tmp/omote-waveshare-test
           /tmp/omote-waveshare-test
+
+      - name: Check WiFi and MQTT retry behavior
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -I . tests/network/network_policy_test.cpp -o /tmp/omote-network-test
+          /tmp/omote-network-test
+          g++ -std=c++17 -Wall -Wextra -Werror -I tests/network/stubs -I . tests/network/mqtt_hal_test.cpp -o /tmp/omote-mqtt-hal-test
+          /tmp/omote-mqtt-hal-test

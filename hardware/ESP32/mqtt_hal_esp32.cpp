@@ -1,4 +1,6 @@
 #include <sstream>
+#include <atomic>
+#include "network_policy.h"
 #include "WiFi.h"
 #include <PubSubClient.h>
 #include "mqtt_hal_esp32.h"
@@ -10,7 +12,11 @@
 #if (ENABLE_WIFI_AND_MQTT == 1)
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
-bool isWifiConnected = false;
+std::atomic<bool> isWifiConnected{false};
+std::atomic<bool> wifiRetryPending{false};
+bool wifiEnabled=false;
+bool mqttEnabled=false;
+omote_network::RetryGate wifiRetry(10000),mqttRetry(10000);
 
 tAnnounceWiFiconnected_cb thisAnnounceWiFiconnected_cb = NULL;
 void set_announceWiFiconnected_cb_HAL(tAnnounceWiFiconnected_cb pAnnounceWiFiconnected_cb) {
@@ -26,44 +32,41 @@ bool getIsWifiConnected_HAL() {
   return isWifiConnected;
 }
 
-// WiFi status event
-void WiFiEvent(WiFiEvent_t event){
-  //Serial.printf("[WiFi-event] event: %d\r\n", event);
-  if(event == ARDUINO_EVENT_WIFI_STA_GOT_IP){
-    // connection to MQTT server will be done in checkMQTTconnection()
-    // mqttClient.setServer(MQTT_SERVER, 1883); // MQTT initialization
-    // mqttClient.connect("OMOTE"); // Connect using a client id
-
-  }
-
-  // Set status bar icon based on WiFi status
-  if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP || event == ARDUINO_EVENT_WIFI_STA_GOT_IP6) {
-    isWifiConnected = true;
-    thisAnnounceWiFiconnected_cb(true);
-    Serial.printf("WiFi connected, IP address: %s\r\n", WiFi.localIP().toString().c_str());
-
-  } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-    isWifiConnected = false;
-    thisAnnounceWiFiconnected_cb(false);
-    // automatically try to reconnect
-    Serial.printf("WiFi got disconnected. Will try to reconnect.\r\n");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  } else {
-    // e.g. ARDUINO_EVENT_WIFI_STA_CONNECTED or many others
-    // connected is not enough, will wait for IP
-    isWifiConnected = false;
-    thisAnnounceWiFiconnected_cb(false);
-
+// The event task only reports state. Never reconfigure a connecting station
+// from its disconnect callback: Arduino also emits events during reconfiguration.
+void WiFiEvent(WiFiEvent_t event) {
+  if(event==ARDUINO_EVENT_WIFI_STA_GOT_IP || event==ARDUINO_EVENT_WIFI_STA_GOT_IP6) {
+    wifiRetryPending=false;
+    if(!isWifiConnected.exchange(true)) {
+      if(thisAnnounceWiFiconnected_cb) thisAnnounceWiFiconnected_cb(true);
+      Serial.printf("WiFi connected, IP address: %s\n",WiFi.localIP().toString().c_str());
+    }
+  } else if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED || event==ARDUINO_EVENT_WIFI_STA_LOST_IP) {
+    wifiRetryPending=true;
+    if(isWifiConnected.exchange(false) && thisAnnounceWiFiconnected_cb) thisAnnounceWiFiconnected_cb(false);
   }
 }
 
-void init_mqtt_HAL(void) {
-  // Setup WiFi
-  WiFi.setHostname("OMOTE"); //define hostname
+void init_mqtt_HAL() {
+  wifiEnabled=omote_network::wifiConfigured(WIFI_SSID,WIFI_PASSWORD);
+  mqttEnabled=omote_network::brokerConfigured(MQTT_SERVER);
+  if(thisAnnounceWiFiconnected_cb) thisAnnounceWiFiconnected_cb(false);
+  if(!wifiEnabled) {
+    Serial.println("WiFi not configured: local GUI/BLE remain available; set src/secrets_override.h to enable networking");
+    return;
+  }
   WiFi.onEvent(WiFiEvent);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.setAutoReconnect(false); // This module owns the single retry schedule.
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname("OMOTE");
+  wifiRetry.mark(millis());
+  WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
   WiFi.setSleep(true);
+  if(!mqttEnabled) Serial.println("MQTT not configured: broker connections disabled");
+  mqttClient.setBufferSize(512);
+  mqttClient.setServer(MQTT_SERVER,MQTT_SERVER_PORT);
+  mqttClient.setSocketTimeout(1);
+  espClient.setConnectionTimeout(1000);
 }
 
 std::string subscribeTopicOMOTEtest = "OMOTE/test";
@@ -148,51 +151,28 @@ void mqtt_subscribeTopics() {
 }
 
 bool checkMQTTconnection() {
-
-  if (WiFi.isConnected()) {
-    if (mqttClient.connected()) {
-      return true;
-    } else {
-      // try to connect to mqtt server
-      mqttClient.setBufferSize(512);   // default is 256
-      //mqttClient.setKeepAlive(15);     // default is 15   Client will send MQTTPINGREQ to keep connection alive
-      //mqttClient.setSocketTimeout(15); // default is 15   This determines how long the client will wait for incoming data when it expects data to arrive - for example, whilst it is in the middle of reading an MQTT packet.
-      mqttClient.setServer(MQTT_SERVER, MQTT_SERVER_PORT); // MQTT initialization
-      
-      std::string mqttClientName = std::string(MQTT_CLIENTNAME) + "_esp32_" + std::string(WiFi.macAddress().c_str());
-      if (mqttClient.connect(mqttClientName.c_str(), MQTT_USER, MQTT_PASS)) {
-        Serial.printf("  Successfully connected to MQTT broker\r\n");
-    
-        mqtt_subscribeTopics();
-
-      } else {
-        Serial.printf("  MQTT connection failed (but WiFi is available). Will try later ...\r\n");
-
-      }
-      return mqttClient.connected();
-    }
+  if(!wifiEnabled || !mqttEnabled || !WiFi.isConnected()) return false;
+  if(mqttClient.connected()) return true;
+  if(!mqttRetry.take(millis())) return false;
+  std::string name=std::string(MQTT_CLIENTNAME)+"_esp32_"+WiFi.macAddress().c_str();
+  if(mqttClient.connect(name.c_str(),MQTT_USER,MQTT_PASS)) {
+    Serial.println("MQTT connected");
+    mqtt_subscribeTopics();
   } else {
-    // Serial.printf("  No connection to MQTT server, because WiFi ist not connected.\r\n");
-    return false;
-  }  
+    Serial.println("MQTT unavailable; next attempt in 10 seconds");
+  }
+  return mqttClient.connected();
 }
 
-unsigned long reconnectInterval = 100;
-// in order to do reconnect immediately ...
-unsigned long lastReconnectAttempt = millis() - reconnectInterval - 1;
 void mqtt_loop_HAL() {
-  if (!mqttClient.connected()) {
-    unsigned long currentMillis = millis();
-    if ((currentMillis - lastReconnectAttempt) > reconnectInterval) {
-      lastReconnectAttempt = currentMillis;
-      // Attempt to reconnect
-      checkMQTTconnection();
-    }
-  }  
-
-  if (mqttClient.connected()) {
-    mqttClient.loop();
+  if(!wifiEnabled) return;
+  if(!WiFi.isConnected() && wifiRetryPending.load() && wifiRetry.take(millis())) {
+    wifiRetryPending=false;
+    Serial.println("WiFi disconnected; retrying connection (10-second interval)");
+    if(!WiFi.reconnect()) wifiRetryPending=true;
   }
+  checkMQTTconnection();
+  if(mqttClient.connected()) mqttClient.loop();
 }
 
 bool publishMQTTMessage_HAL(const char *topic, const char *payload){
@@ -214,6 +194,10 @@ bool publishMQTTMessage_HAL(const char *topic, const char *payload){
 }
 
 void wifi_shutdown_HAL() {
+  wifiEnabled=false;
+  mqttClient.disconnect();
+  wifiRetryPending=false;
+  isWifiConnected=false;
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
 }
