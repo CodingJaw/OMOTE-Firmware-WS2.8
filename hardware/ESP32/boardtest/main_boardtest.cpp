@@ -9,6 +9,8 @@
   #include <Keypad.h> // modified for inverted logic
 #endif
 #include <esp_heap_caps.h>
+#include <esp_mac.h>
+#include "../pwm_esp32.h"
 #include <soc/soc_memory_layout.h> // esp_ptr_internal(), to report where the draw buffer ended up
 #include "SparkFunLIS3DH.h"
 #include "Wire.h"
@@ -610,9 +612,8 @@ void setup() {
   keypad.writeRegister(TCA8418_REG_GPI_EM_1, 0b00111111);
   keypad.writeRegister(TCA8418_REG_GPI_EM_2, 0b00011111); // disable interrupt for COL5 (USB_3V3)
   
-  ledcSetup(LEDC_CHANNEL_6, 5000, 8);
-  ledcAttachPin(KBD_BL_GPIO, LEDC_CHANNEL_6);
-  ledcWrite(LEDC_CHANNEL_6, 0);
+  ESP_ERROR_CHECK(setupKeyboardPwm(KBD_BL_GPIO));
+  writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, 0);
 
   #else
   // Button Pin Definition
@@ -685,17 +686,17 @@ void loop() {
   if (millis() < fadeInTimer + backlightBrightness) {
     // after boot or wakeup, fade in backlight brightness
     // fade in lasts for <backlightBrightness> ms
-    ledcWrite(LEDC_CHANNEL_5, millis() - fadeInTimer);
+    writePwmDuty(LEDC_SPEED_MODE, LEDC_CHANNEL_5, millis() - fadeInTimer);
   } else {
     if(standbyTimer < 2000 && !show_touches) {
       // less than 2000 ms until standby
       // dim backlight
-      ledcWrite(LEDC_CHANNEL_5, 85);
+      writePwmDuty(LEDC_SPEED_MODE, LEDC_CHANNEL_5, 85);
     } else {
       // normal mode, set full backlightBrightness
       // turn off PWM if backlight is at full brightness
       if(backlightBrightness < 255){
-        ledcWrite(LEDC_CHANNEL_5, backlightBrightness);
+        writePwmDuty(LEDC_SPEED_MODE, LEDC_CHANNEL_5, backlightBrightness);
       }
       else{
         ledc_stop(LEDC_SPEED_MODE, LEDC_CHANNEL_5, 255);
@@ -707,18 +708,18 @@ void loop() {
   if (millis() < fadeInTimer + keyboardBrightness) {
     // after boot or wakeup, fade in keyboard brightness
     // fade in lasts for <keyboardBrightness> ms
-    ledcWrite(LEDC_CHANNEL_6, millis() - fadeInTimer);
+    writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, millis() - fadeInTimer);
   }
   else {
     if(standbyTimer < 2000 && !show_touches) {
       // less than 2000 ms until standby
       // dim keyboard
-      ledcWrite(LEDC_CHANNEL_6, 160);
+      writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, 160);
     } else {
       // normal mode, set full keyboardBrightness
       // turn off PWM if keyboard is at full brightness
       if(keyboardBrightness < 255){
-        ledcWrite(LEDC_CHANNEL_6, keyboardBrightness);
+        writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, keyboardBrightness);
       }
       else{
         ledc_stop(LEDC_SPEED_MODE, LEDC_CHANNEL_6, 255);

@@ -1,3 +1,4 @@
+#include "pwm_esp32.h"
 #include <Arduino.h>
 // Not needed by the compiler, only by PlatformIO's library dependency finder (LDF).
 // The FT6206 library is always built, because it is in lib_deps - also with DISPLAY_DRIVER 0,
@@ -21,17 +22,17 @@ void update_backlightBrightness_HAL(void) {
   if (millis() < fadeInTimer + backlightBrightness) {
     // after boot or wakeup, fade in backlight brightness
     // fade in lasts for <backlightBrightness> ms
-    ledcWrite(LEDC_CHANNEL_5, millis() - fadeInTimer);
+    writePwmDuty(LEDC_SPEED_MODE, LEDC_CHANNEL_5, millis() - fadeInTimer);
   } else {
     if (millis() - get_lastActivityTimestamp() > get_sleepTimeout_HAL() - 2000) {
       // less than 2000 ms until standby
       // dim backlight
-      ledcWrite(LEDC_CHANNEL_5, get_backlightBrightness_HAL() * 0.3);
+      writePwmDuty(LEDC_SPEED_MODE, LEDC_CHANNEL_5, get_backlightBrightness_HAL() * 0.3);
     } else {
       // normal mode, set full backlightBrightness
       // turn off PWM if backlight is at full brightness
       if(backlightBrightness < 255){
-        ledcWrite(LEDC_CHANNEL_5, backlightBrightness);
+        writePwmDuty(LEDC_SPEED_MODE, LEDC_CHANNEL_5, backlightBrightness);
       }
       else{
         ledc_stop(LEDC_SPEED_MODE, LEDC_CHANNEL_5, 255);

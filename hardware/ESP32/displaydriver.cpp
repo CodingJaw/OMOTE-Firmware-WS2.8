@@ -12,7 +12,7 @@
 void setup_tft(void) {
   // Configure the backlight PWM
   // Manual setup because ledcSetup() briefly turns on the backlight
-  ledc_channel_config_t ledc_channel_left;
+  ledc_channel_config_t ledc_channel_left = {};
   ledc_channel_left.gpio_num = (gpio_num_t)LCD_BL_GPIO;
   ledc_channel_left.speed_mode = LEDC_SPEED_MODE;
   ledc_channel_left.channel = LEDC_CHANNEL_5;
@@ -27,9 +27,8 @@ void setup_tft(void) {
   ledc_channel_left.flags.output_invert = 1; // Can't do this with ledcSetup()
   // hpoint and duty explained:
   // https://miro.medium.com/v2/resize:fit:1400/1*ViqSTFdH9COZ51iKYrIyMA.png
-  ledc_channel_config(&ledc_channel_left);
 
-  ledc_timer_config_t ledc_timer;
+  ledc_timer_config_t ledc_timer = {};
   ledc_timer.speed_mode = LEDC_SPEED_MODE;
   ledc_timer.duty_resolution = LEDC_TIMER_8_BIT;
   ledc_timer.timer_num = LEDC_TIMER_1;
@@ -40,7 +39,8 @@ void setup_tft(void) {
   esp_err_t err = ledc_timer_config(&ledc_timer);
   if (err != ESP_OK) {
     Serial.println("Error when calling ledc_timer_config!");
-  }  
+  }
+  ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel_left));
 
   #if (OMOTE_HARDWARE_REV == 1)
   // Slowly charge the VSW voltage to prevent a brownout

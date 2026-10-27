@@ -116,7 +116,9 @@ int main(int argc, char *argv[]) {
 
   // Register the GUIs. They will be displayed in the order they have been registered.
   register_gui_sceneSelection();
+  #if !defined(OMOTE_BOARD_WAVESHARE_LCD_28)
   register_gui_irReceiver();
+  #endif
   register_gui_settings();
   register_gui_appleTV();
   register_gui_numpad();
@@ -129,7 +131,10 @@ int main(int argc, char *argv[]) {
   // Only show these GUIs in the main gui list. If you don't set this explicitely, by default all registered guis are shown.
   #if (USE_SCENE_SPECIFIC_GUI_LIST != 0)
   main_gui_list =
-    {tabName_yamahaAmp, tabName_sceneSelection, tabName_smarthome, tabName_settings, tabName_irReceiver
+    {tabName_yamahaAmp, tabName_sceneSelection, tabName_smarthome, tabName_settings
+    #if !defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+    , tabName_irReceiver
+    #endif
     #if (ENABLE_KEYBOARD_BLE == 1)
     , tabName_blepairing
     #endif

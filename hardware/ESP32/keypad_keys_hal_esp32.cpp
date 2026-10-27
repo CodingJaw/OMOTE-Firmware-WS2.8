@@ -1,3 +1,4 @@
+#include "pwm_esp32.h"
 #include <Arduino.h>
 #include "driver/ledc.h"
 #include "keypad_keys_hal_esp32.h"
@@ -96,9 +97,8 @@ void init_keys_HAL(void) {
   keypad.writeRegister(TCA8418_REG_GPI_EM_1, 0b00111111);
   keypad.writeRegister(TCA8418_REG_GPI_EM_2, 0b00011111); // disable interrupt for COL5 (USB_3V3)
   
-  ledcSetup(LEDC_CHANNEL_6, 5000, 8);
-  ledcAttachPin(KBD_BL_GPIO, LEDC_CHANNEL_6);
-  ledcWrite(LEDC_CHANNEL_6, 0);
+  ESP_ERROR_CHECK(setupKeyboardPwm(KBD_BL_GPIO));
+  writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, 0);
 
   #else
   // Button Pin Definition
@@ -230,13 +230,13 @@ void update_keyboardBrightness_HAL(void) {
   if (millis() < fadeInTimer + keyboardBrightness) {
     // after boot or wakeup, fade in keyboard brightness
     // fade in lasts for <keyboardBrightness> ms
-    ledcWrite(LEDC_CHANNEL_6, millis() - fadeInTimer);
+    writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, millis() - fadeInTimer);
   }
   else {
     // normal mode, set full keyboardBrightness    
     // turn off PWM if keyboard is at full brightness
     if(keyboardBrightness < 255){
-      ledcWrite(LEDC_CHANNEL_6, keyboardBrightness);
+      writePwmDuty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, keyboardBrightness);
     }
     else{
       ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_6, 255);

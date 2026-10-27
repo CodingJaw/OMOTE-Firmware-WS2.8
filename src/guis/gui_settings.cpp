@@ -23,7 +23,7 @@ static void bl_slider_event_cb(lv_event_t* e){
   set_backlightBrightness(slider_value);
 }
 
-#if(OMOTE_HARDWARE_REV >= 5)
+#if(OMOTE_HARDWARE_REV >= 5) && !defined(OMOTE_BOARD_WAVESHARE_LCD_28)
 // Keyboard Backlight Slider Event handler
 static void kb_slider_event_cb(lv_event_t* e){
   lv_obj_t* slider = lv_event_get_target(e);
@@ -204,7 +204,7 @@ void create_tab_content_settings(lv_obj_t* tab) {
   // lv_label_set_text(menuLabel, LV_SYMBOL_RIGHT);
   // lv_obj_align(menuLabel, LV_ALIGN_TOP_RIGHT, 0, 32);
 
-  #if(OMOTE_HARDWARE_REV >= 5)
+  #if(OMOTE_HARDWARE_REV >= 5) && !defined(OMOTE_BOARD_WAVESHARE_LCD_28)
   // Another setting for the keyboard ----------------------------------------------------------
   menuLabel = lv_label_create(tab);
   lv_label_set_text(menuLabel, "Keyboard");

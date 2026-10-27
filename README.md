@@ -48,6 +48,16 @@ Long term goals (not yet scheduled)
 
 See the [open issues](https://github.com/OMOTE-Community/OMOTE-Firmware/issues) and [discussions](https://github.com/OMOTE-Community/OMOTE-Firmware/discussions) for a full list of proposed features (and known issues).
 
+### Waveshare ESP32-S3-LCD-2.8
+
+A dedicated Arduino 3 target is available:
+
+```sh
+pio run -e waveshare-esp32-s3-lcd-28
+```
+
+See [Waveshare setup, wiring, controls and hardware checks](docs/WAVESHARE.md). This target uses Waveshare's SPI LCD, CST328 touch and power circuitry. The stock board has no infrared emitter/receiver; BLE and configured MQTT are available. Physical-board validation is still required.
+
 ## Contributing
 
 If you have a suggestion for an improvement, please fork the repo and create a pull request. You can also simply open an issue or - for more general feature requests - head over to the [discussions](https://github.com/OMOTE-Community/OMOTE-Firmware/discussions).
