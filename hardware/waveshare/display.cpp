@@ -4,8 +4,14 @@
 #include <Wire.h>
 #include <LovyanGFX.hpp>
 #include <esp_heap_caps.h>
+#include <soc/soc_memory_layout.h>
 #include "../ESP32/displaydriver.h"
 #include "../ESP32/sleep_hal_esp32.h"
+
+// Diagnostics can vary SPI speed without changing the standard Waveshare target.
+#ifndef OMOTE_WAVESHARE_SPI_HZ
+#define OMOTE_WAVESHARE_SPI_HZ 40000000
+#endif
 
 namespace {
 class Display : public lgfx::LGFX_Device {
@@ -14,7 +20,7 @@ class Display : public lgfx::LGFX_Device {
 public:
   Display() {
     auto b=bus.config();
-    b.spi_host=SPI2_HOST; b.spi_mode=0; b.freq_write=40000000;
+    b.spi_host=SPI2_HOST; b.spi_mode=0; b.freq_write=OMOTE_WAVESHARE_SPI_HZ;
     b.pin_sclk=waveshare::lcdSck; b.pin_mosi=waveshare::lcdMosi;
     b.pin_miso=-1; b.pin_dc=waveshare::lcdDc; b.dma_channel=SPI_DMA_CH_AUTO;
     bus.config(b); panel.setBus(&bus);
@@ -25,7 +31,10 @@ public:
     p.invert=true; p.rgb_order=false; p.readable=false;
     panel.config(p); setPanel(&panel);
   }
-} display;
+ } display;
+#if defined(OMOTE_SWIPE_ASYNC_DMA)
+bool dmaTransactionStarted=false;
+#endif
 volatile bool touchPending=true;
 enum class TouchController {None,CST328,CST3530};
 TouchController touchController=TouchController::None;
@@ -87,6 +96,10 @@ void init_tft() {
     ledcWrite(waveshare::backlight,128);
     abort();
   }
+#if defined(OMOTE_SWIPE_ASYNC_DMA)
+  display.initDMA();
+#endif
+  Serial.printf("[SWIPE] SPI requested clock: %lu Hz (hardware divider may round)\n", (unsigned long)OMOTE_WAVESHARE_SPI_HZ);
   display.setRotation(0); display.fillScreen(TFT_BLACK);
   // Keep the first rendered screen visible even if later BLE/network startup
   // blocks before loop() can update brightness. GPIO5 is active high.
@@ -108,29 +121,70 @@ void init_tft() {
 }
 void init_lvgl_buffer() {
   constexpr size_t pixels=240*32;
+  constexpr size_t bytes=pixels*sizeof(lv_color_t);
   lv_color_t *buf=nullptr;
+#ifdef OMOTE_SWIPE_ASYNC_DMA
+  // DMA may read directly from the LVGL buffer after flush_cb returns.
+  // Allocate *two* DMA-capable internal buffers; do not enable async if
+  // either allocation fails.
+  lv_color_t *buf2=static_cast<lv_color_t*>(heap_caps_malloc(bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT));
+  buf=static_cast<lv_color_t*>(heap_caps_malloc(bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT));
+  if(buf && buf2 && esp_ptr_dma_capable(buf) && esp_ptr_dma_capable(buf2)) {
+    lvgl_flush_async=true;
+    lv_disp_draw_buf_init(&draw_buf,buf,buf2,pixels);
+    Serial.printf("[SWIPE] async SPI DMA: two internal buffers (%u bytes each); queue time is not transfer time\n",unsigned(bytes));
+    return;
+  }
+  free(buf); free(buf2); buf=nullptr;
+  Serial.println("[SWIPE] DMA buffers unavailable; falling back to synchronous one-buffer flush");
+#endif
 #ifdef OMOTE_SWIPE_INTERNAL_BUFFER
-  buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+  buf=static_cast<lv_color_t*>(heap_caps_malloc(bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
   Serial.println("[SWIPE] internal-RAM LVGL buffer requested");
 #else
-  buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  buf=static_cast<lv_color_t*>(heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   Serial.println("[SWIPE] PSRAM-first LVGL buffer requested");
 #endif
-  if(!buf) buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_8BIT));
+  if(!buf) buf=static_cast<lv_color_t*>(heap_caps_malloc(bytes,MALLOC_CAP_8BIT));
   if(!buf) { Serial.println("ERROR: LVGL draw-buffer allocation failed"); abort(); }
-  Serial.printf("Waveshare display: LVGL draw buffer ready (%u bytes)\n",unsigned(pixels*sizeof(lv_color_t)));
+  lvgl_flush_async=false;
+  Serial.printf("Waveshare display: LVGL one-buffer synchronous mode (%u bytes in %s)\n",
+                unsigned(bytes), esp_ptr_internal(buf) ? "internal RAM" : "PSRAM");
   lv_disp_draw_buf_init(&draw_buf,buf,nullptr,pixels);
 }
 void my_disp_flush(lv_disp_drv_t *drv,const lv_area_t *area,lv_color_t *pixels) {
 #ifdef OMOTE_SWIPE_DIAGNOSTICS
   uint32_t started=micros();
 #endif
+  const uint32_t w=uint32_t(area->x2-area->x1+1);
+  const uint32_t h=uint32_t(area->y2-area->y1+1);
+#ifdef OMOTE_SWIPE_ASYNC_DMA
+  if(lvgl_flush_async) {
+    // LovyanGFX queues the SPI DMA transfer using the original LVGL buffer.
+    // Keeping the bus open avoids endWrite() waiting for DMA completion.
+    // pushImageDMA() synchronizes with any *previous* outstanding transfer,
+    // which protects the first buffer when LVGL alternates between two.
+    // swap565_t matches the existing synchronous LV_COLOR_16_SWAP==0 path.
+    if(!dmaTransactionStarted) {
+      display.startWrite();
+      dmaTransactionStarted=true;
+    }
+    display.pushImageDMA(area->x1,area->y1,w,h,
+      reinterpret_cast<lgfx::swap565_t*>(pixels));
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+    // This measures DMA *queue/wait* time, not time until the panel is drawn.
+    ws_perf::noteFlush(w*h,micros()-started);
+#endif
+    lv_disp_flush_ready(drv);
+    return;
+  }
+#endif
   display.startWrite();
-  display.setAddrWindow(area->x1,area->y1,area->x2-area->x1+1,area->y2-area->y1+1);
-  display.pushPixels(reinterpret_cast<uint16_t*>(pixels),(area->x2-area->x1+1)*(area->y2-area->y1+1),LV_COLOR_16_SWAP==0);
+  display.setAddrWindow(area->x1,area->y1,w,h);
+  display.pushPixels(reinterpret_cast<uint16_t*>(pixels),w*h,LV_COLOR_16_SWAP==0);
   display.endWrite();
 #ifdef OMOTE_SWIPE_DIAGNOSTICS
-  ws_perf::noteFlush(uint32_t(area->x2-area->x1+1)*uint32_t(area->y2-area->y1+1),micros()-started);
+  ws_perf::noteFlush(w*h,micros()-started);
 #endif
   lv_disp_flush_ready(drv);
 }
