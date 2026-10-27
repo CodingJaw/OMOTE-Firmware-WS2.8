@@ -1,6 +1,6 @@
 # Arduino 3 migration
 
-The ESP32 environments use PlatformIO `espressif32@8.0.0` (Arduino 3.3.12 / ESP-IDF 5). Arduino_GFX is pinned to 1.6.9 for the updated ESP32 SPI APIs. LVGL remains on version 8; this migration does not change the GUI API.
+The ESP32 environments use PlatformIO `espressif32@8.0.0` (Arduino 3.3.12 / ESP-IDF 5). Arduino_GFX is pinned to 1.6.9 for the updated ESP32 SPI APIs. NimBLE-Arduino is pinned to 2.5.2: older stacks can compile but crash on controller initialization with Arduino 3.3.7+; the HID wrapper rejects versions older than the upstream initialization fix in 2.3.8. LVGL remains on version 8; this migration does not change the GUI API.
 
 Build the same targets as Ubuntu CI from the repository root:
 

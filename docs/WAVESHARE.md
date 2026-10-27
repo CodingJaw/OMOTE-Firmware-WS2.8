@@ -81,3 +81,33 @@ Press RESET after opening the monitor (the USB port may re-enumerate). The test 
 - **Bands appear:** LCD/backlight work with the raw vendor initialization. Then reflash `waveshare-esp32-s3-lcd-28`, capture serial output from RESET, and report the last completed startup stage. This separates the library/GUI/PWM/network initialization paths.
 
 The power-latch startup code now preloads GPIO7 through ESP-IDF before enabling its output; Arduino 3 ignores `digitalWrite` before `pinMode`, which the original port incorrectly relied on. The normal firmware now enables a 50% backlight immediately after display-driver initialization, before touch, BLE and network startup finish. It reports the display pin mapping, initialization errors, draw-buffer allocation and entry/exit of BLE initialization. A successful SPI-driver initialization message is not panel readback: this connection is write-only. Diagnostic builds are compile-checked in cloud; the black-screen cause remains unconfirmed until physical results/serial logs are available.
+
+## BLE initialization reboot loop (Arduino 3.3.12)
+
+A reported hardware log reached `Waveshare startup: initializing BLE keyboard` and then failed with `block_locate_free` / `tlsf_control_functions.h`, repeating on every boot. The original port still selected NimBLE-Arduino 1.4.3. NimBLE's upstream changelog documents an ESP32 initialization-crash fix for Arduino 3.3.7+ in 2.3.8; this project now pins 2.5.2. The HID wrapper explicitly includes Arduino headers, uses the public NimBLE version macros to reject unsupported versions, and starts the GATT server using the current API. The normal target retains BLE. Old BLE pairings may need to be recreated after the stack-format upgrade; no whole-flash erase is part of this update.
+
+To preserve local changes while updating a Git checkout:
+
+```sh
+git stash push -u -m "local edits before BLE update"
+git fetch origin
+git switch waveshare-arduino3
+git pull --ff-only origin waveshare-arduino3
+pio run -e waveshare-esp32-s3-lcd-28 -t clean
+pio run -e waveshare-esp32-s3-lcd-28 -t upload
+pio device monitor -e waveshare-esp32-s3-lcd-28 -b 115200
+```
+
+The stash retains tracked edits and untracked files. Ignored credentials remain in place. Keep the stash while testing; use `git stash list` / `git stash show --stat` to review it before restoring selected edits. Do not use `git clean -fdx`, a hard reset, or whole-flash erasure as a routine update step. If a command reports an error, stop and inspect it rather than forcing the checkout.
+
+Confirm the build dependency graph reports NimBLE-Arduino **2.5.2**. After reset, the serial log should print `BLE: starting ...2.5.2`, finish BLE initialization, and reach `Setup finished`. Physical confirmation that the reboot is resolved is still required; cloud compilation does not execute the ESP32 controller.
+
+For isolation or immediate GUI/Wi-Fi testing without the BLE stack, a separate target omits the BLE source files and dependency entirely:
+
+```sh
+pio run -e waveshare-no-ble -t upload
+```
+
+This recovery target has no BLE keyboard/pairing UI. The normal target remains `waveshare-esp32-s3-lcd-28`; use it to retest the actual dependency fix. A `CST328 absent` message is separate from a BLE controller crash and does not block GUI initialization.
+
+BLE update validation: the normal Waveshare firmware and the existing OMOTE ESP32-S3 firmware build with NimBLE 2.5.2. The no-BLE recovery firmware also builds, and symbol inspection confirms it does not contain `NimBLEDevice::init`. Portable board checks pass. These results verify build/API integration and isolation; the reported physical reboot must be retested on the device.

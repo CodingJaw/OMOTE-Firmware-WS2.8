@@ -68,3 +68,11 @@ jobs:
 
       - name: Build PlatformIO env:linux_64bit
         run: pio run -e linux_64bit
+
+      - name: Build Waveshare firmware and recovery targets
+        run: pio run -e waveshare-esp32-s3-lcd-28 -e waveshare-no-ble -e waveshare-display-test
+
+      - name: Check Waveshare packet, battery and button handling
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -I . tests/waveshare/board_test.cpp -o /tmp/omote-waveshare-test
+          /tmp/omote-waveshare-test

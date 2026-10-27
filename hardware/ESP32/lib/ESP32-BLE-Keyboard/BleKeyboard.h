@@ -1,12 +1,14 @@
-// This include is only needed to determine if NimBLE 1.4.x or 2.0.x is used.
-// NimBLE 2.0.x is using nimble core 1.5, and only in this version BLE_STORE_OBJ_TYPE_LOCAL_IRK is defined
-#include "nimble/nimble/host/include/host/ble_store.h"
-#if defined(BLE_STORE_OBJ_TYPE_LOCAL_IRK)
-#define NIMBLE_ARDUINO_2_x
-#endif
-
 #ifndef ESP32_BLE_KEYBOARD_H
 #define ESP32_BLE_KEYBOARD_H
+#include <Arduino.h>
+#include <NimBLECppVersion.h>
+// Earlier NimBLE releases can compile against Arduino 3.3.12 yet crash during
+// controller initialization. Use a public version API, not an internal store layout.
+#if NIMBLE_CPP_VERSION < NIMBLE_CPP_VERSION_VAL(2, 3, 8)
+#error "Arduino 3.3.12 requires NimBLE-Arduino >= 2.3.8; use the pinned project dependency"
+#endif
+#define NIMBLE_ARDUINO_2_x
+
 #include "sdkconfig.h"
 #if defined(CONFIG_BT_ENABLED)
 
