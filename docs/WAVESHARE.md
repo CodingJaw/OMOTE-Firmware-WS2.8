@@ -63,3 +63,21 @@ Pin assignments and protocols were checked against Waveshare's [board documentat
 - The board-specific Linux GUI rendered and selected TV → Numpad, then exited normally.
 - Touch-packet, battery conversion, debounce, held-at-boot and timer-rollover checks passed, including AddressSanitizer/UndefinedBehaviorSanitizer execution.
 - Physical-board flashing and peripheral validation have **not** been performed. Arduino/NimBLE SDK macro warnings remain as documented in [the migration notes](ARDUINO3.md); BLE pairing, persistent bonds and MQTT require real service/hardware checks.
+
+## Black-screen diagnosis
+
+Update to the latest `waveshare-arduino3` branch and first flash the standalone display test:
+
+```sh
+pio run -e waveshare-display-test -t upload --upload-port YOUR_PORT
+pio device monitor -b 115200 --port YOUR_PORT
+```
+
+Press RESET after opening the monitor (the USB port may re-enumerate). The test drives backlight GPIO5 HIGH without PWM, asserts the battery power latch, and initializes the ST7789 using the manufacturer's register values at a conservative 20 MHz SPI clock. It does not initialize OMOTE, BLE, Wi-Fi, LVGL or touch. Expected output is four horizontal bands: red, green, blue, white. Serial output repeats `DISPLAY TEST running` once per second.
+
+- **No serial heartbeat:** capture the boot/reset output and check the selected target and exact board revision. The application may not be reaching setup.
+- **Heartbeat, no backlight glow:** investigate board revision/pin mapping or backlight power. This test bypasses PWM.
+- **Backlight glow, no bands:** investigate the LCD reset/SPI wiring, controller or revision. This is independent of LVGL and BLE.
+- **Bands appear:** LCD/backlight work with the raw vendor initialization. Then reflash `waveshare-esp32-s3-lcd-28`, capture serial output from RESET, and report the last completed startup stage. This separates the library/GUI/PWM/network initialization paths.
+
+The power-latch startup code now preloads GPIO7 through ESP-IDF before enabling its output; Arduino 3 ignores `digitalWrite` before `pinMode`, which the original port incorrectly relied on. The normal firmware now enables a 50% backlight immediately after display-driver initialization, before touch, BLE and network startup finish. It reports the display pin mapping, initialization errors, draw-buffer allocation and entry/exit of BLE initialization. A successful SPI-driver initialization message is not panel readback: this connection is write-only. Diagnostic builds are compile-checked in cloud; the black-screen cause remains unconfirmed until physical results/serial logs are available.

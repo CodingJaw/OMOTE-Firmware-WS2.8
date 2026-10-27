@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SD_MMC.h>
+#include <driver/gpio.h>
 #include <lvgl.h>
 #include "../ESP32/include_hal_esp32.h"
 
@@ -47,8 +48,11 @@ void encoderRead(lv_indev_drv_t*,lv_indev_data_t *data) {
 }
 }
 void init_hardware_general_HAL() {
-  // Assert the battery latch immediately. Never pulse it low during boot.
-  digitalWrite(waveshare::powerLatch,HIGH); pinMode(waveshare::powerLatch,OUTPUT);
+  // Arduino 3 digitalWrite ignores pins not yet registered as GPIO. Preload
+  // the hardware output latch via IDF, then enable output without a LOW pulse.
+  gpio_set_level(gpio_num_t(waveshare::powerLatch),1);
+  pinMode(waveshare::powerLatch,OUTPUT);
+  digitalWrite(waveshare::powerLatch,HIGH);
   pinMode(waveshare::powerKey,INPUT_PULLUP); pinMode(waveshare::bootKey,INPUT_PULLUP);
   bootButton.reset(digitalRead(waveshare::bootKey)==LOW,millis());
   powerButton.reset(digitalRead(waveshare::powerKey)==LOW,millis());
@@ -134,7 +138,7 @@ void update_keyboardBrightness_HAL() {}
 uint8_t get_keyboardBrightness_HAL() { return 0; }
 void set_keyboardBrightness_HAL(uint8_t) {}
 void init_SD_HAL() {
-  digitalWrite(waveshare::sdD3,HIGH); pinMode(waveshare::sdD3,OUTPUT);
+  pinMode(waveshare::sdD3,OUTPUT); digitalWrite(waveshare::sdD3,HIGH);
   if(!SD_MMC.setPins(waveshare::sdClock,waveshare::sdCommand,waveshare::sdData)) {
     Serial.println("SD pin setup failed"); return;
   }

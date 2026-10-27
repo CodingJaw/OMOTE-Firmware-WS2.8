@@ -47,12 +47,27 @@ lv_disp_draw_buf_t draw_buf;
 bool lvgl_flush_async=false;
 bool TouchInitSuccessful=false;
 void setup_tft() {
-  if(!ledcAttach(waveshare::backlight,20000,8)) abort();
+  Serial.println("Waveshare display: configuring backlight GPIO5");
+  if(!ledcAttach(waveshare::backlight,20000,8)) {
+    Serial.println("ERROR: backlight PWM attach failed");
+    abort();
+  }
   ledcWrite(waveshare::backlight,0);
 }
 void setup_wire() { Wire.begin(waveshare::sda,waveshare::scl,400000); Wire.setTimeOut(50); }
 void init_tft() {
-  display.init(); display.setRotation(0); display.fillScreen(TFT_BLACK);
+  Serial.printf("Waveshare display: initializing ST7789, SCK=%d MOSI=%d CS=%d DC=%d RST=%d\n",
+                waveshare::lcdSck,waveshare::lcdMosi,waveshare::lcdCs,waveshare::lcdDc,waveshare::lcdReset);
+  if(!display.init()) {
+    Serial.println("ERROR: LovyanGFX display initialization failed");
+    ledcWrite(waveshare::backlight,128);
+    abort();
+  }
+  display.setRotation(0); display.fillScreen(TFT_BLACK);
+  // Keep the first rendered screen visible even if later BLE/network startup
+  // blocks before loop() can update brightness. GPIO5 is active high.
+  ledcWrite(waveshare::backlight,128);
+  Serial.println("Waveshare display: SPI driver initialized (no panel readback); backlight at 50%");
   // A default focus group also permits button navigation on non-touch units.
   lv_group_set_default(lv_group_create());
   Wire1.begin(waveshare::touchSda,waveshare::touchScl,400000); Wire1.setTimeOut(50);
@@ -63,13 +78,14 @@ void init_tft() {
   digitalWrite(waveshare::touchReset,HIGH); delay(50);
   attachInterrupt(waveshare::touchInterrupt,touchInterrupt,RISING);
   TouchInitSuccessful=touchChipResponds_display_specific();
-  Serial.printf("Waveshare ST7789 ready; CST328 %s\n",TouchInitSuccessful?"ready":"absent (use BOOT/PWR navigation)");
+  Serial.printf("Waveshare display setup complete; CST328 %s\n",TouchInitSuccessful?"ready":"absent (use BOOT/PWR navigation)");
 }
 void init_lvgl_buffer() {
   constexpr size_t pixels=240*32;
   auto *buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   if(!buf) buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_8BIT));
-  if(!buf) abort();
+  if(!buf) { Serial.println("ERROR: LVGL draw-buffer allocation failed"); abort(); }
+  Serial.printf("Waveshare display: LVGL draw buffer ready (%u bytes)\n",unsigned(pixels*sizeof(lv_color_t)));
   lv_disp_draw_buf_init(&draw_buf,buf,nullptr,pixels);
 }
 void my_disp_flush(lv_disp_drv_t *drv,const lv_area_t *area,lv_color_t *pixels) {

@@ -161,7 +161,13 @@ int main(int argc, char *argv[]) {
 
   // init BLE keyboard. Has to be after init_gui (because of powered I2C) and after init_battery (because of fuel gauge init)
   #if (ENABLE_KEYBOARD_BLE == 1)
+  #if defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+  Serial.println("Waveshare startup: initializing BLE keyboard");
+  #endif
   init_keyboardBLE();
+  #if defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+  Serial.println("Waveshare startup: BLE keyboard initialized");
+  #endif
   #endif
 
   // setup keyboard matrix driver
