@@ -103,7 +103,11 @@ BleKeyboard::BleKeyboard(std::string deviceName, std::string deviceManufacturer,
 
 void BleKeyboard::begin(void)
 {
-  NimBLEDevice::init(deviceName);
+  Serial.printf("BLE: starting %s\n", NimBLEDevice::getVersion());
+  if (!NimBLEDevice::init(deviceName)) {
+    Serial.println("BLE: controller initialization failed; use waveshare-no-ble to isolate radio startup");
+    abort();
+  }
   NimBLEServer* pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(this);
 
@@ -140,7 +144,11 @@ void BleKeyboard::begin(void)
   #else
   hid->setReportMap((uint8_t*)_hidReportDescriptor, sizeof(_hidReportDescriptor));
   #endif
-  hid->startServices();
+  // NimBLE 2.4+ starts/registers all services through the server.
+  if (!pServer->start()) {
+    Serial.println("BLE: HID GATT server initialization failed");
+    abort();
+  }
 
   advertising = pServer->getAdvertising();
   advertising->setAppearance(HID_KEYBOARD);

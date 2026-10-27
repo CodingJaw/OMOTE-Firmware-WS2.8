@@ -116,7 +116,9 @@ int main(int argc, char *argv[]) {
 
   // Register the GUIs. They will be displayed in the order they have been registered.
   register_gui_sceneSelection();
+  #if !defined(OMOTE_BOARD_WAVESHARE_LCD_28)
   register_gui_irReceiver();
+  #endif
   register_gui_settings();
   register_gui_appleTV();
   register_gui_numpad();
@@ -129,7 +131,10 @@ int main(int argc, char *argv[]) {
   // Only show these GUIs in the main gui list. If you don't set this explicitely, by default all registered guis are shown.
   #if (USE_SCENE_SPECIFIC_GUI_LIST != 0)
   main_gui_list =
-    {tabName_yamahaAmp, tabName_sceneSelection, tabName_smarthome, tabName_settings, tabName_irReceiver
+    {tabName_yamahaAmp, tabName_sceneSelection, tabName_smarthome, tabName_settings
+    #if !defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+    , tabName_irReceiver
+    #endif
     #if (ENABLE_KEYBOARD_BLE == 1)
     , tabName_blepairing
     #endif
@@ -156,7 +161,13 @@ int main(int argc, char *argv[]) {
 
   // init BLE keyboard. Has to be after init_gui (because of powered I2C) and after init_battery (because of fuel gauge init)
   #if (ENABLE_KEYBOARD_BLE == 1)
+  #if defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+  Serial.println("Waveshare startup: initializing BLE keyboard");
+  #endif
   init_keyboardBLE();
+  #if defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+  Serial.println("Waveshare startup: BLE keyboard initialized");
+  #endif
   #endif
 
   // setup keyboard matrix driver

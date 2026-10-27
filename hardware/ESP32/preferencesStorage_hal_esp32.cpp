@@ -1,3 +1,4 @@
+#include <string>
 #include <Preferences.h>
 #include "sleep_hal_esp32.h"
 #include "tft_hal_esp32.h"

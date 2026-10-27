@@ -1,5 +1,6 @@
 #if (ENABLE_KEYBOARD_BLE == 1)
 
+#include <Arduino.h>
 #include <nvs.h>
 #include <nvs_flash.h>
 

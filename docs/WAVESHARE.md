@@ -1,0 +1,135 @@
+# Waveshare ESP32-S3-LCD-2.8
+
+Build and upload **this target**, not an OMOTE revision target:
+
+```sh
+pio run -e waveshare-esp32-s3-lcd-28
+pio run -e waveshare-esp32-s3-lcd-28 -t upload --upload-port YOUR_PORT
+pio device monitor -b 115200 --port YOUR_PORT
+```
+
+On the cloud machine, first `source /workspace/omote-setup/activate.sh`. Flashing needs a machine with USB access to the board. The first serial output should identify the ST7789, report detected CST328/CST3530 controller, and identify QMI8658 or report it missing. If upload fails, hold BOOT while tapping RESET, then release BOOT and retry. Native USB CDC is enabled; USB GPIO19/20 are never reassigned.
+
+The target retains Arduino 3, 16 MB flash, 8 MB OPI PSRAM and the existing 16 MB no-OTA partition table. Its source filter selects a separate hardware layer and shared Wi-Fi/MQTT, BLE, preferences and LVGL code. It excludes every OMOTE display, keypad, battery, sleep, LED, SD and infrared GPIO implementation. Existing OMOTE environments retain their wiring.
+
+| Hardware | Pins / implementation |
+| --- | --- |
+| ST7789, 240 × 320 portrait | SPI SCK40, MOSI45, CS42, DC41, reset39; 40 MHz, inversion enabled |
+| LCD backlight | GPIO5, active high, 20 kHz PWM |
+| Touch, auto-detected | Separate Wire1: SDA1, SCL3, reset2, interrupt4; V1 CST328 at 0x1A or V2 CST3530 at 0x58 |
+| QMI8658 and RTC bus | Wire: SDA11, SCL10; QMI address detected at 0x6B/0x6A |
+| QMI8658 | Acceleration at 4 g / 30 Hz; gyro not needed for motion wake |
+| Battery | ADC GPIO8, manufacturer's divider/calibration; percentage is a voltage-based estimate |
+| Battery power | Latch GPIO7 asserted at startup; active-low power key GPIO6 |
+| Optional SD, one-bit SD_MMC | CLK14, CMD17, D0=16, D3=21 high; no formatting on mount failure |
+
+## Controls and behavior
+
+- Touch operates the normal OMOTE GUI. A single touch point is decoded and bounds-checked; absent/failed touch does not block startup. The non-touch example package uses simulated input. Touch V1 uses CST328; Touch V2 uses CST3530 on the same separate bus.
+- BOOT advances focus; a short PWR press activates the focused control. This also permits basic navigation on non-touch units. Holding PWR for three seconds saves preferences and drops the battery latch. Holding it during startup does not immediately turn the unit off: release it first. With USB connected, releasing the battery latch cannot remove USB power; the screen stays off until reset.
+- Inactivity dims the screen, then turns off its backlight. Touch, buttons, and enabled QMI8658 motion sensing restore activity. Standby intentionally keeps the MCU and BLE active: this is **not deep sleep**, and battery runtime will be shorter than a verified low-power port. No untested motion-interrupt wake programming is used.
+- The stock board has no OMOTE keypad, keypad lighting, IR emitter/receiver, or status LED. GPIO45 is the display's MOSI signal, so the OMOTE heartbeat LED is never initialized. The keypad-brightness and IR receiver controls are hidden. IR commands report that no transmitter is configured; IR-controlled TVs/amplifiers need an external hardware/driver addition. BLE and MQTT commands remain available.
+- Charging status cannot be measured from the exposed interface and is not fabricated. The RTC, speaker/audio and SD are not used by OMOTE's current workflow; SD initialization is optional and not called at startup.
+- Configure Wi-Fi/MQTT using the ignored `src/secrets_override.h` mechanism. Never commit credentials. Unconfigured network services do not prevent GUI startup.
+
+## Checks
+
+Portable touch-packet/battery conversion regression checks:
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -I . tests/waveshare/board_test.cpp -o /tmp/omote-waveshare-test
+/tmp/omote-waveshare-test
+```
+
+Board-specific GUI preview on Linux (requires SDL2 and an X server):
+
+```sh
+pio run -e linux_waveshare_ui
+SDL_VIDEODRIVER=x11 .pio/build/linux_waveshare_ui/program
+```
+
+This preview exercises board-specific UI visibility, not the ESP32 drivers. Firmware compilation and host checks cannot prove the physical display, touch, polarity, battery power latch, motion behavior, BLE or MQTT work. Before regular use: flash this target, verify the startup diagnostics; touch all four corners and hold/drag/release; check colors/orientation; adjust brightness; test blanking and touch/motion/button wake; pair/send/reconnect BLE; test configured MQTT; compare battery voltage to a meter; finally test battery-only long-press shutdown. Do not use an OMOTE board-diagnostic image on this board.
+
+## References
+
+Pin assignments and protocols were checked against Waveshare's [board documentation](https://docs.waveshare.com/ESP32-S3-LCD-2.8), [schematic](https://files.waveshare.com/wiki/ESP32-S3-LCD-2.8/ESP32-S3-Touch-LCD-2.8.pdf), [LCD example](https://files.waveshare.com/wiki/ESP32-S3-LCD-2.8/ESP32-S3-LCD-2.8-Demo.zip), and [CST328 touch example](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-2.8/ESP32-S3-Touch-LCD-2.8-Demo.zip). The touch protocol and ADC conversion are reimplemented here with bounded I2C reads; manufacturer source files are not compiled into this project. The Touch-LCD-2.8 V2 touch protocol is now supported through auto-detection; B/C variants remain separate, unverified boards.
+
+## Validation completed in cloud
+
+- Waveshare firmware built successfully after the final power-button adjustment (ESP32-S3; about 2.44 MB application).
+- Bootloader image inspection reported 16 MB flash and valid checksum/hash.
+- Source-list inspection confirmed that the Waveshare build includes only the intended shared ESP32 code and new hardware layer, with no OMOTE GPIO drivers.
+- OMOTE ESP32 revision 1–4 and revision 5 firmware regression builds passed, as did the normal Linux build.
+- The board-specific Linux GUI rendered and selected TV → Numpad, then exited normally.
+- Touch-packet, battery conversion, debounce, held-at-boot and timer-rollover checks passed, including AddressSanitizer/UndefinedBehaviorSanitizer execution.
+- Physical-board flashing and peripheral validation have **not** been performed. Arduino/NimBLE SDK macro warnings remain as documented in [the migration notes](ARDUINO3.md); BLE pairing, persistent bonds and MQTT require real service/hardware checks.
+
+## Black-screen diagnosis
+
+Update to the latest `waveshare-arduino3` branch and first flash the standalone display test:
+
+```sh
+pio run -e waveshare-display-test -t upload --upload-port YOUR_PORT
+pio device monitor -b 115200 --port YOUR_PORT
+```
+
+Press RESET after opening the monitor (the USB port may re-enumerate). The test drives backlight GPIO5 HIGH without PWM, asserts the battery power latch, and initializes the ST7789 using the manufacturer's register values at a conservative 20 MHz SPI clock. It does not initialize OMOTE, BLE, Wi-Fi, LVGL or touch. Expected output is four horizontal bands: red, green, blue, white. Serial output repeats `DISPLAY TEST running` once per second.
+
+- **No serial heartbeat:** capture the boot/reset output and check the selected target and exact board revision. The application may not be reaching setup.
+- **Heartbeat, no backlight glow:** investigate board revision/pin mapping or backlight power. This test bypasses PWM.
+- **Backlight glow, no bands:** investigate the LCD reset/SPI wiring, controller or revision. This is independent of LVGL and BLE.
+- **Bands appear:** LCD/backlight work with the raw vendor initialization. Then reflash `waveshare-esp32-s3-lcd-28`, capture serial output from RESET, and report the last completed startup stage. This separates the library/GUI/PWM/network initialization paths.
+
+The power-latch startup code now preloads GPIO7 through ESP-IDF before enabling its output; Arduino 3 ignores `digitalWrite` before `pinMode`, which the original port incorrectly relied on. The normal firmware now enables a 50% backlight immediately after display-driver initialization, before touch, BLE and network startup finish. It reports the display pin mapping, initialization errors, draw-buffer allocation and entry/exit of BLE initialization. A successful SPI-driver initialization message is not panel readback: this connection is write-only. Diagnostic builds are compile-checked in cloud; the black-screen cause remains unconfirmed until physical results/serial logs are available.
+
+## BLE initialization reboot loop (Arduino 3.3.12)
+
+A reported hardware log reached `Waveshare startup: initializing BLE keyboard` and then failed with `block_locate_free` / `tlsf_control_functions.h`, repeating on every boot. The original port still selected NimBLE-Arduino 1.4.3. NimBLE's upstream changelog documents an ESP32 initialization-crash fix for Arduino 3.3.7+ in 2.3.8; this project now pins 2.5.2. The HID wrapper explicitly includes Arduino headers, uses the public NimBLE version macros to reject unsupported versions, and starts the GATT server using the current API. The normal target retains BLE. Old BLE pairings may need to be recreated after the stack-format upgrade; no whole-flash erase is part of this update.
+
+To preserve local changes while updating a Git checkout:
+
+```sh
+git stash push -u -m "local edits before BLE update"
+git fetch origin
+git switch waveshare-arduino3
+git pull --ff-only origin waveshare-arduino3
+pio run -e waveshare-esp32-s3-lcd-28 -t clean
+pio run -e waveshare-esp32-s3-lcd-28 -t upload
+pio device monitor -e waveshare-esp32-s3-lcd-28 -b 115200
+```
+
+The stash retains tracked edits and untracked files. Ignored credentials remain in place. Keep the stash while testing; use `git stash list` / `git stash show --stat` to review it before restoring selected edits. Do not use `git clean -fdx`, a hard reset, or whole-flash erasure as a routine update step. If a command reports an error, stop and inspect it rather than forcing the checkout.
+
+Confirm the build dependency graph reports NimBLE-Arduino **2.5.2**. After reset, the serial log should print `BLE: starting ...2.5.2`, finish BLE initialization, and reach `Setup finished`. Physical confirmation that the reboot is resolved is still required; cloud compilation does not execute the ESP32 controller.
+
+For isolation or immediate GUI/Wi-Fi testing without the BLE stack, a separate target omits the BLE source files and dependency entirely:
+
+```sh
+pio run -e waveshare-no-ble -t upload
+```
+
+This recovery target has no BLE keyboard/pairing UI. The normal target remains `waveshare-esp32-s3-lcd-28`; use it to retest the actual dependency fix. A `CST328 absent` message is separate from a BLE controller crash and does not block GUI initialization.
+
+BLE update validation: the normal Waveshare firmware and the existing OMOTE ESP32-S3 firmware build with NimBLE 2.5.2. The no-BLE recovery firmware also builds, and symbol inspection confirms it does not contain `NimBLEDevice::init`. Portable board checks pass. These results verify build/API integration and isolation; the reported physical reboot must be retested on the device.
+
+
+## Unresponsive touch and repeated Wi-Fi disconnects
+
+Waveshare's [current Touch-LCD-2.8 documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-2.8) states that V1/ST7789+CST328 was replaced by V2/ST7789+CST3530 shipments in June 2026. The driver now probes both addresses and uses the [V2 vendor example](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-2.8/ESP32-S3-Touch-LCD-2.8-V2-Demo.zip) for CST3530's 32-bit command addresses, packet layout, acknowledgement and reset/startup timing. The display pins do not change. CST3530 input is polled so missing interrupt edges cannot prevent all touch input.
+
+After updating/uploading, reset and look for `Waveshare touch: detected CST3530 (V2)` or `CST328 (V1)`. A touch should print `Touch down: x=... y=...`, followed by `Touch released`. If neither controller acknowledges, the log names both addresses and the SDA/SCL pins. BOOT cycles focus, the middle RESET button reboots, and PWR is the separate power/activation key; RESET is not an input-navigation button.
+
+The old Wi-Fi event callback called `WiFi.begin` repeatedly while the driver was already connecting. Connection setup now happens once; disconnect events only record state, with reconnect attempts scheduled from the main loop at ten-second intervals. MQTT retries share a separate ten-second budget across background processing and publication requests. Placeholder Wi-Fi or broker settings disable that unconfigured service, keeping the local GUI available. MQTT socket/connect waits are reduced, although configured DNS/broker failures still require hardware/network testing.
+
+Create the ignored `src/secrets_override.h` **locally** to configure Wi-Fi. For an open network use an empty password:
+
+```cpp
+#undef WIFI_SSID
+#define WIFI_SSID "YourNetworkName"
+#undef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+```
+
+This local file is not distributed by GitHub. Keep an existing override's other settings when editing it. Broker settings can remain unset while testing the GUI and Wi-Fi association.
+
+New regression checks cover CST3530 down/release/bounds, placeholder settings, retry timing and rollover, and the actual production Wi-Fi/MQTT HAL against a synthetic event/transport layer. The HAL test injects 1,000 duplicate disconnect events, verifies that the callback never reconfigures Wi-Fi, checks the shared MQTT retry budget and verifies shutdown prevents reconnection. Physical touch and Wi-Fi connectivity still require a board retest.
