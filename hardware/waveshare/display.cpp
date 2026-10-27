@@ -1,4 +1,5 @@
 #include "board.h"
+#include "perf.h"
 #include <Arduino.h>
 #include <Wire.h>
 #include <LovyanGFX.hpp>
@@ -107,17 +108,31 @@ void init_tft() {
 }
 void init_lvgl_buffer() {
   constexpr size_t pixels=240*32;
-  auto *buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  lv_color_t *buf=nullptr;
+#ifdef OMOTE_SWIPE_INTERNAL_BUFFER
+  buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+  Serial.println("[SWIPE] internal-RAM LVGL buffer requested");
+#else
+  buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  Serial.println("[SWIPE] PSRAM-first LVGL buffer requested");
+#endif
   if(!buf) buf=static_cast<lv_color_t*>(heap_caps_malloc(pixels*sizeof(lv_color_t),MALLOC_CAP_8BIT));
   if(!buf) { Serial.println("ERROR: LVGL draw-buffer allocation failed"); abort(); }
   Serial.printf("Waveshare display: LVGL draw buffer ready (%u bytes)\n",unsigned(pixels*sizeof(lv_color_t)));
   lv_disp_draw_buf_init(&draw_buf,buf,nullptr,pixels);
 }
 void my_disp_flush(lv_disp_drv_t *drv,const lv_area_t *area,lv_color_t *pixels) {
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  uint32_t started=micros();
+#endif
   display.startWrite();
   display.setAddrWindow(area->x1,area->y1,area->x2-area->x1+1,area->y2-area->y1+1);
   display.pushPixels(reinterpret_cast<uint16_t*>(pixels),(area->x2-area->x1+1)*(area->y2-area->y1+1),LV_COLOR_16_SWAP==0);
-  display.endWrite(); lv_disp_flush_ready(drv);
+  display.endWrite();
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  ws_perf::noteFlush(uint32_t(area->x2-area->x1+1)*uint32_t(area->y2-area->y1+1),micros()-started);
+#endif
+  lv_disp_flush_ready(drv);
 }
 bool touchChipResponds_display_specific() {
   if(touchController!=TouchController::None) return true;
@@ -150,7 +165,18 @@ void my_touchpad_read_display_specific(lv_indev_drv_t*,lv_indev_data_t *data) {
     if(uint32_t(millis()-lastV2Read)>=20) {
       lastV2Read=millis();
       uint8_t frame[9]={};
-      pressed=touchV2Read(frame) && waveshare::decodeTouchV2(frame,lastX,lastY);
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+      uint32_t started=micros();
+      uint16_t previousX=lastX,previousY=lastY;
+      static uint32_t previousRead=0;
+      uint32_t gap=previousRead?millis()-previousRead:0;
+      previousRead=millis();
+#endif
+      bool busOk=touchV2Read(frame);
+      pressed=busOk && waveshare::decodeTouchV2(frame,lastX,lastY);
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+      ws_perf::noteTouchRead(micros()-started,busOk,pressed && (previousX!=lastX || previousY!=lastY),gap);
+#endif
     }
   } else if(pending && touchController==TouchController::CST328) {
     uint8_t count=0,frame[5]={},clear=0;
