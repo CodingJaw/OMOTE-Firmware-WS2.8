@@ -1,3 +1,6 @@
+#if defined(OMOTE_SWIPE_DIAGNOSTICS) && defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+#include "../../../hardware/waveshare/perf.h"
+#endif
 #include <mutex>
 #include <lvgl.h>
 #include "guis/gui_BLEpairing.h"
@@ -71,6 +74,9 @@ void screen_gesture_event_cb(lv_event_t* e) {
 // Set the page indicator (panel) scroll position relative to the tabview content scroll position
 // this is a callback if the CONTENT of the tabview is scrolled (LV_EVENT_SCROLL)
 void tabview_content_is_scrolling_event_cb(lv_event_t* e){
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  ws_perf::noteScroll();
+#endif
   if (panel == NULL) { return;}
 
   float bias = float(150.0 + 8.0) / SCR_WIDTH;
@@ -307,7 +313,13 @@ void gui_loop(void) {
   //   }
   // }
 
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  uint32_t lvglStarted=micros();
+#endif
   lv_timer_handler();
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  ws_perf::noteLvgl(micros()-lvglStarted);
+#endif
 
   // flush texts that might have been added from callbacks from other threads
   // has to be done in a thread safe way in the main thread
