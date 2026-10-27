@@ -42,3 +42,38 @@ Potential patterns:
 - Big improvement with internal-RAM buffer -> PSRAM draw-buffer access/copy overhead.
 
 There are no functionality changes intended by these tests. Do not enable per-scroll Serial logging while measuring, as that itself can cause lag. This diagnostic branch is meant for physical testing; the firmware has not yet been verified on the connected hardware.
+
+## Phase 2: SPI clock and async DMA experiments
+
+Keep the original `waveshare-swipe-test` image (40 MHz synchronous, PSRAM-first) as your recovery baseline. Test each target separately; all targets inherit the same Waveshare V2 touchscreen and button code.
+
+```sh
+git fetch origin
+git switch test/swipe-performance-diagnostics
+git pull --ff-only origin test/swipe-performance-diagnostics
+```
+
+Run the following **in order**, swapping the build target in the upload command:
+
+| Target | SPI request | Mode |
+| --- | --- | --- |
+| `waveshare-swipe-test` | 40 MHz | original synchronous SPI, PSRAM-first LVGL buffer |
+| `waveshare-swipe-60mhz` | 60 MHz | same synchronous SPI, same PSRAM buffer |
+| `waveshare-swipe-dma40` | 40 MHz | experimental SPI DMA, two DMA-capable internal buffers |
+| `waveshare-swipe-dma60` | 60 MHz | experimental DMA at increased speed; only after DMA40 passes |
+
+```sh
+pio run -e waveshare-swipe-60mhz -t upload --upload-port /dev/ttyACM0
+pio device monitor -p /dev/ttyACM0 -b 115200
+```
+
+Switch to the other environment names as needed. The port could change after USB reset.
+
+**Important DMA safety:** The code allocates both buffers in internal DMA-capable RAM and switches to asynchronous mode only if both allocations succeed. LovyanGFX `pushImageDMA` handles synchronization with a previously pending transfer; keeping `startWrite` open avoids inadvertently blocking on `endWrite`. During DMA, the `[SWIPE] SPI flush` figure reflects time spent queueing or waiting, NOT wall-clock panel transfer duration. Compare smoothness, LVGL stalls, scroll-event count and touchscreen gaps too.
+
+After each flash, inspect screen orientation, colors, text integrity, and full page transitions. If DMA shows corrupted stripes, shifted colors, missing screen regions or reboots, **stop testing DMA** and reflash `waveshare-swipe-test`. Do not erase flash or alter saved Wi-Fi secrets.
+
+These are **experimental builds, not a proven speed-up**. The standard `waveshare-arduino3` branch has not been changed. The SPI divider may round the requested 60 MHz value, so the logged value is the *request*, not measured wire frequency. GitHub Actions compile checks do not substitute for hardware testing.
+
+### Additional finding from logs
+Your PSRAM and internal-RAM diagnostics reported similar ~3.7 ms synchronous flushes while dragging and repeated 300–540 ms tab reconstruction, so moving the draw buffer alone does not address those pauses. Multi-second unrelated command-handler stalls should be diagnosed separately.
