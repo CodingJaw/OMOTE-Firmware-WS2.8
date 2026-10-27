@@ -1,3 +1,7 @@
+#if defined(OMOTE_SWIPE_DIAGNOSTICS) && defined(OMOTE_BOARD_WAVESHARE_LCD_28)
+#include "../../../hardware/waveshare/perf.h"
+#include <Arduino.h>
+#endif
 #include <lvgl.h>
 #include "applicationInternal/gui/guiBase.h"
 #include "applicationInternal/gui/guiMemoryOptimizer.h"
@@ -603,6 +607,9 @@ void gui_memoryOptimizer_onStartup(lv_obj_t** tabview, lv_obj_t** panel, lv_obj_
 
 // 2. tab creation after sliding (called by tabview_tab_changed_event_cb())
 void gui_memoryOptimizer_afterSliding(lv_obj_t** tabview, lv_obj_t** panel, lv_obj_t** img1, lv_obj_t** img2, int newTabID) {
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  uint32_t rebuildStarted=micros();
+#endif
 
   // Here the magic for dynamic creation and deletion of lvgl objects happens to keep memory usage low.
   // The next and previous tab must always be available in the tabview, because they can already been seen during the animation.
@@ -636,6 +643,9 @@ void gui_memoryOptimizer_afterSliding(lv_obj_t** tabview, lv_obj_t** panel, lv_o
 
   // 3. create content
   gui_memoryOptimizer_doContentCreation(tabview, panel, img1, img2, &gui_state);
+#ifdef OMOTE_SWIPE_DIAGNOSTICS
+  ws_perf::noteRebuild(micros()-rebuildStarted);
+#endif
 
 }
 
