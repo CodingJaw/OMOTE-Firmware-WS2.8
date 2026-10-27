@@ -72,6 +72,9 @@ jobs:
       - name: Build Waveshare firmware and recovery targets
         run: pio run -e waveshare-esp32-s3-lcd-28 -e waveshare-no-ble -e waveshare-display-test
 
+      - name: Compile Waveshare swipe performance variants
+        run: pio run -e waveshare-swipe-test -e waveshare-swipe-60mhz -e waveshare-swipe-dma40 -e waveshare-swipe-dma60
+
       - name: Check Waveshare packet, battery and button handling
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -I . tests/waveshare/board_test.cpp -o /tmp/omote-waveshare-test
